@@ -1,65 +1,151 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import FingerprintJS from "@fingerprintjs/fingerprintjs";
+import { isMobile, isTablet, osName, osVersion, browserName } from "react-device-detect";
+import DeviceCard from "./components/DeviceCard";
+
+// Helper: String ko Unique Hash ID me badalne ke liye
+const generateHash = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(16);
+};
 
 export default function Home() {
+  const [loading, setLoading] = useState(false);
+  const [deviceData, setDeviceData] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleScan = async () => {
+    setLoading(true);
+    setError("");
+    setDeviceData(null);
+
+    try {
+      // --- STEP 1: STABLE ID GENERATION (Chrome/Edge Same ID) ---
+      // Hum sirf wo hardware data lenge jo browser change hone par nahi badalta
+      const screenRes = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : "0x0";
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const cores = navigator.hardwareConcurrency || "N/A";
+      const memory = navigator.deviceMemory || "N/A";
+      const platform = navigator.platform; 
+
+      // Ye string hamesha same rahegi chahe browser koi bhi ho
+      const stableString = `${screenRes}|${timeZone}|${cores}|${memory}|${platform}`;
+      const crossBrowserID = generateHash(stableString);
+
+      // --- STEP 2: STANDARD FINGERPRINT (Backup) ---
+      const fp = await FingerprintJS.load();
+      const fpResult = await fp.get();
+
+      // --- STEP 3: EXACT GPS LOCATION (Shahdol wala code wapas aa gaya) ---
+      const getPosition = () => {
+        return new Promise((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error("Geolocation not supported"));
+          } else {
+            // High Accuracy Mode On
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 0
+            });
+          }
+        });
+      };
+
+      let locationInfo = {
+        lat: null,
+        lon: null,
+        city: "Permission Denied / Unavailable",
+        state: "",
+        full_address: ""
+      };
+
+      try {
+        const position = await getPosition();
+        const { latitude, longitude } = position.coords;
+        
+        locationInfo.lat = latitude;
+        locationInfo.lon = longitude;
+
+        // Coordinates ko City Name me convert karna
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+        );
+        const geoJson = await geoRes.json();
+        
+        locationInfo.city = geoJson.address.city || geoJson.address.town || geoJson.address.village || "Unknown City";
+        locationInfo.state = geoJson.address.state || "";
+        locationInfo.full_address = geoJson.display_name;
+
+      } catch (err) {
+        console.warn("Location fetch failed:", err);
+        // Agar user ne Allow nahi kiya, tab bhi ID generate hogi, bas location blank hogi
+      }
+
+      // --- STEP 4: PREPARE FINAL DATA ---
+      let deviceCategory = "Desktop/Laptop";
+      if (isMobile) deviceCategory = "Mobile";
+      if (isTablet) deviceCategory = "Tablet";
+
+      const finalPayload = {
+        // IDs
+        stable_device_id: crossBrowserID,      // USE THIS FOR REFERRAL (Unique Hardware ID)
+        browser_fingerprint_id: fpResult.visitorId, // Changes with browser
+        
+        // Location
+        location: locationInfo,
+
+        // Hardware details
+        device: {
+          type: deviceCategory,
+          os: `${osName} ${osVersion}`,
+          browser: browserName,
+          screen: screenRes,
+          cores: cores,
+          ram: `${memory} GB`
+        }
+      };
+
+      setDeviceData(finalPayload);
+
+    } catch (err) {
+      console.error(err);
+      setError("Error: Please allow location permission to get correct data.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-950 text-white">
+      <div className="text-center max-w-lg mb-8">
+        <h1 className="text-3xl font-bold text-blue-400 mb-2">Super Device Scanner</h1>
+        <p className="text-gray-400 text-sm">
+          Extracts <b>Stable Hardware ID</b> (for Referral) + <b>Exact GPS Location</b> (Shahdol).
+        </p>
+      </div>
+
+      <button
+        onClick={handleScan}
+        disabled={loading}
+        className={`
+          px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all 
+          ${loading ? "bg-gray-700" : "bg-green-600 hover:bg-green-500 shadow-green-500/30"}
+        `}
+      >
+        {loading ? "Scanning Hardware & GPS..." : "📍 Scan Device & Location"}
+      </button>
+
+      {error && <p className="mt-4 text-red-400 bg-red-900/20 px-4 py-2 rounded">{error}</p>}
+
+      <DeviceCard data={deviceData} />
+    </main>
   );
 }
