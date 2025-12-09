@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import FingerprintJS from "@fingerprintjs/fingerprintjs";
-import { isMobile, isTablet, osName, osVersion, browserName } from "react-device-detect";
+import { isMobile, isTablet, browserName } from "react-device-detect"; // Removed osName/osVersion
 import DeviceCard from "./components/DeviceCard";
 
-// Helper: String ko Unique Hash ID me badalne ke liye
+// Helper: String to Hash
 const generateHash = (str) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -14,6 +14,37 @@ const generateHash = (str) => {
     hash = hash & hash;
   }
   return Math.abs(hash).toString(16);
+};
+
+// --- NEW HELPER: ACCURATE OS DETECTION ---
+const detectOS = () => {
+  if (typeof window === "undefined") return "Unknown OS";
+  
+  const userAgent = window.navigator.userAgent;
+  const platform = window.navigator.platform;
+  const macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'];
+  const windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'];
+  const iosPlatforms = ['iPhone', 'iPad', 'iPod'];
+
+  let os = "Unknown OS";
+
+  if (macosPlatforms.indexOf(platform) !== -1) {
+    os = 'Mac OS';
+  } else if (iosPlatforms.indexOf(platform) !== -1 || /iPhone|iPad|iPod/.test(userAgent)) {
+    os = 'iOS';
+  } else if (windowsPlatforms.indexOf(platform) !== -1) {
+    os = 'Windows';
+    // Check specific Windows Version
+    if (/Windows NT 10.0/.test(userAgent)) os = "Windows 10/11";
+    if (/Windows NT 6.2/.test(userAgent)) os = "Windows 8";
+    if (/Windows NT 6.1/.test(userAgent)) os = "Windows 7";
+  } else if (/Android/.test(userAgent)) {
+    os = 'Android';
+  } else if (!os && /Linux/.test(platform)) {
+    os = 'Linux';
+  }
+
+  return os;
 };
 
 export default function Home() {
@@ -27,29 +58,26 @@ export default function Home() {
     setDeviceData(null);
 
     try {
-      // --- STEP 1: STABLE ID GENERATION (Chrome/Edge Same ID) ---
-      // Hum sirf wo hardware data lenge jo browser change hone par nahi badalta
+      // --- STEP 1: STABLE ID GENERATION ---
       const screenRes = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : "0x0";
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const cores = navigator.hardwareConcurrency || "N/A";
       const memory = navigator.deviceMemory || "N/A";
       const platform = navigator.platform; 
 
-      // Ye string hamesha same rahegi chahe browser koi bhi ho
       const stableString = `${screenRes}|${timeZone}|${cores}|${memory}|${platform}`;
       const crossBrowserID = generateHash(stableString);
 
-      // --- STEP 2: STANDARD FINGERPRINT (Backup) ---
+      // --- STEP 2: FINGERPRINT ---
       const fp = await FingerprintJS.load();
       const fpResult = await fp.get();
 
-      // --- STEP 3: EXACT GPS LOCATION (Shahdol wala code wapas aa gaya) ---
+      // --- STEP 3: GPS LOCATION ---
       const getPosition = () => {
         return new Promise((resolve, reject) => {
           if (!navigator.geolocation) {
             reject(new Error("Geolocation not supported"));
           } else {
-            // High Accuracy Mode On
             navigator.geolocation.getCurrentPosition(resolve, reject, {
               enableHighAccuracy: true,
               timeout: 10000,
@@ -74,7 +102,6 @@ export default function Home() {
         locationInfo.lat = latitude;
         locationInfo.lon = longitude;
 
-        // Coordinates ko City Name me convert karna
         const geoRes = await fetch(
           `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
         );
@@ -86,7 +113,6 @@ export default function Home() {
 
       } catch (err) {
         console.warn("Location fetch failed:", err);
-        // Agar user ne Allow nahi kiya, tab bhi ID generate hogi, bas location blank hogi
       }
 
       // --- STEP 4: PREPARE FINAL DATA ---
@@ -94,18 +120,16 @@ export default function Home() {
       if (isMobile) deviceCategory = "Mobile";
       if (isTablet) deviceCategory = "Tablet";
 
-      const finalPayload = {
-        // IDs
-        stable_device_id: crossBrowserID,      // USE THIS FOR REFERRAL (Unique Hardware ID)
-        browser_fingerprint_id: fpResult.visitorId, // Changes with browser
-        
-        // Location
-        location: locationInfo,
+      // Yaha hum apna naya function use kar rahe hain
+      const exactOS = detectOS(); 
 
-        // Hardware details
+      const finalPayload = {
+        stable_device_id: crossBrowserID,
+        browser_fingerprint_id: fpResult.visitorId,
+        location: locationInfo,
         device: {
           type: deviceCategory,
-          os: `${osName} ${osVersion}`,
+          os: exactOS, // UPDATED: Using manual detection
           browser: browserName,
           screen: screenRes,
           cores: cores,
@@ -128,7 +152,7 @@ export default function Home() {
       <div className="text-center max-w-lg mb-8">
         <h1 className="text-3xl font-bold text-blue-400 mb-2">Super Device Scanner</h1>
         <p className="text-gray-400 text-sm">
-          Extracts <b>Stable Hardware ID</b> (for Referral) + <b>Exact GPS Location</b> (Shahdol).
+          <b>Device ID</b> + <b>GPS Location</b> 
         </p>
       </div>
 

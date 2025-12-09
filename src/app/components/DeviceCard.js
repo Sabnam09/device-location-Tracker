@@ -12,7 +12,7 @@ export default function DeviceCard({ data }) {
       {/* PRIMARY ID SECTION */}
       <div className="bg-blue-900/20 border border-blue-500/50 p-4 rounded-lg mb-6">
         <p className="text-blue-400 text-xs font-bold uppercase tracking-wider mb-1">
-          Stable Hardware ID (For Referral Tracking)
+          Device ID 
         </p>
         <p className="text-white text-3xl font-mono font-bold tracking-wide break-all">
           {data.stable_device_id}
