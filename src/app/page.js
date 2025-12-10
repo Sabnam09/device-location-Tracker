@@ -2,146 +2,133 @@
 
 import { useState } from "react";
 import FingerprintJS from "@fingerprintjs/fingerprintjs";
-import { isMobile, isTablet, browserName } from "react-device-detect"; // Removed osName/osVersion
-import DeviceCard from "./components/DeviceCard";
-
-// Helper: String to Hash
-const generateHash = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16);
-};
-
-// --- NEW HELPER: ACCURATE OS DETECTION ---
-const detectOS = () => {
-  if (typeof window === "undefined") return "Unknown OS";
-  
-  const userAgent = window.navigator.userAgent;
-  const platform = window.navigator.platform;
-  const macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'];
-  const windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'];
-  const iosPlatforms = ['iPhone', 'iPad', 'iPod'];
-
-  let os = "Unknown OS";
-
-  if (macosPlatforms.indexOf(platform) !== -1) {
-    os = 'Mac OS';
-  } else if (iosPlatforms.indexOf(platform) !== -1 || /iPhone|iPad|iPod/.test(userAgent)) {
-    os = 'iOS';
-  } else if (windowsPlatforms.indexOf(platform) !== -1) {
-    os = 'Windows';
-    // Check specific Windows Version
-    if (/Windows NT 10.0/.test(userAgent)) os = "Windows 10/11";
-    if (/Windows NT 6.2/.test(userAgent)) os = "Windows 8";
-    if (/Windows NT 6.1/.test(userAgent)) os = "Windows 7";
-  } else if (/Android/.test(userAgent)) {
-    os = 'Android';
-  } else if (!os && /Linux/.test(platform)) {
-    os = 'Linux';
-  }
-
-  return os;
-};
+import { UAParser } from "ua-parser-js"; 
+import DeviceCard from "./components/DeviceCard"; 
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
   const [error, setError] = useState("");
+  const [statusMsg, setStatusMsg] = useState(""); // User ko dikhane ke liye ki kya ho rha hai
+
+  // --- REDIRECTION LOGIC ---
+  const performRedirection = (deviceType, osName) => {
+    setStatusMsg(`Detected ${deviceType}. Redirecting...`);
+
+    // 1. DESKTOP / LAPTOP / TABLET -> Go to Web Portal
+    // Note: UAParser tablet ko alag manta hai, isliye hum check kar rahe hain
+    if (deviceType !== "Mobile") {
+       setTimeout(() => {
+         window.location.href = "https://sajpeweb.raavan.site/";
+       }, 1500); // 1.5 sec delay taaki user card dekh sake
+       return;
+    }
+
+    // 2. MOBILE (Android/iOS) -> Go to App or Play Store
+    if (deviceType === "Mobile") {
+       const appScheme = "sajpe://home"; // ⚠️ IMPORTANT: Aapke App ka Deep Link Scheme yahan dalein
+       const playStoreLink = "https://play.google.com/store/apps/details?id=com.saj_pe";
+       
+       // iOS Specific (Optional: App Store link logic alag ho sakti hai)
+       // const appStoreLink = "https://apps.apple.com/app-id";
+
+       setStatusMsg("Launching App...");
+       
+       // Step A: Try to open the App
+       window.location.href = appScheme;
+
+       // Step B: Fallback to Play Store if App doesn't open
+       // Logic: Agar app khul gyi, to browser background me chala jayega aur timeout delay ho jayega.
+       // Agar app nahi khuli, to browser wahi rahega aur turant Play Store redirect kar dega.
+       setTimeout(() => {
+         const confirmFallback = window.confirm("SajPe App not found. Go to Play Store?");
+         if (confirmFallback) {
+            window.location.href = playStoreLink;
+         }
+       }, 2000);
+    }
+  };
 
   const handleScan = async () => {
     setLoading(true);
     setError("");
     setDeviceData(null);
+    setStatusMsg("Scanning Device...");
 
     try {
-      // --- STEP 1: STABLE ID GENERATION ---
-      const screenRes = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : "0x0";
-      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const cores = navigator.hardwareConcurrency || "N/A";
-      const memory = navigator.deviceMemory || "N/A";
-      const platform = navigator.platform; 
+      // --- 1. DEVICE TYPE DETECTION ---
+      const parser = new UAParser();
+      const result = parser.getResult();
 
-      const stableString = `${screenRes}|${timeZone}|${cores}|${memory}|${platform}`;
-      const crossBrowserID = generateHash(stableString);
+      // OS Name
+      const osName = result.os.name;
+      const osVersion = result.os.version;
+      const exactOS = `${osName} ${osVersion}`.trim();
 
-      // --- STEP 2: FINGERPRINT ---
-      const fp = await FingerprintJS.load();
-      const fpResult = await fp.get();
+      // Browser
+      const browserName = result.browser.name;
 
-      // --- STEP 3: GPS LOCATION ---
-      const getPosition = () => {
-        return new Promise((resolve, reject) => {
-          if (!navigator.geolocation) {
-            reject(new Error("Geolocation not supported"));
-          } else {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 0
-            });
-          }
-        });
-      };
+      // Device Type Logic
+      let rawType = result.device.type; // mobile, tablet, smarttv, wearable, embedded
+      let deviceType = "Desktop / Laptop"; // Default
 
-      let locationInfo = {
-        lat: null,
-        lon: null,
-        city: "Permission Denied / Unavailable",
-        state: "",
-        full_address: ""
-      };
-
-      try {
-        const position = await getPosition();
-        const { latitude, longitude } = position.coords;
-        
-        locationInfo.lat = latitude;
-        locationInfo.lon = longitude;
-
-        const geoRes = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-        );
-        const geoJson = await geoRes.json();
-        
-        locationInfo.city = geoJson.address.city || geoJson.address.town || geoJson.address.village || "Unknown City";
-        locationInfo.state = geoJson.address.state || "";
-        locationInfo.full_address = geoJson.display_name;
-
-      } catch (err) {
-        console.warn("Location fetch failed:", err);
+      if (rawType) {
+        // Capitalize (mobile -> Mobile)
+        deviceType = rawType.charAt(0).toUpperCase() + rawType.slice(1);
       }
 
-      // --- STEP 4: PREPARE FINAL DATA ---
-      let deviceCategory = "Desktop/Laptop";
-      if (isMobile) deviceCategory = "Mobile";
-      if (isTablet) deviceCategory = "Tablet";
+      // --- 2. FINGERPRINT & IP (Keeping your logic) ---
+      const fp = await FingerprintJS.load();
+      const fpResult = await fp.get();
+      const strongDeviceID = fpResult.visitorId; 
 
-      // Yaha hum apna naya function use kar rahe hain
-      const exactOS = detectOS(); 
+      let ipAddress = "";
+      try {
+        const ipRes = await fetch("https://api.ipify.org?format=json");
+        const ipJson = await ipRes.json();
+        ipAddress = ipJson.ip;
+      } catch (e) { console.warn("IP Error"); }
 
+      // --- 3. LOCATION ---
+      let locationInfo = { lat: null, lon: null, city: "Permission Denied", state: "", full_address: "" };
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'geolocation' });
+        if (permissionStatus.state === 'granted') {
+          const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject));
+          const { latitude, longitude } = position.coords;
+          locationInfo.lat = latitude;
+          locationInfo.lon = longitude;
+          const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          const geoJson = await geoRes.json();
+          locationInfo.city = geoJson.address.city || "Unknown";
+          locationInfo.state = geoJson.address.state || "";
+          locationInfo.full_address = geoJson.display_name;
+        } 
+      } catch (err) { console.warn("Silent Location Check Failed"); }
+
+      // --- 4. SET DATA ---
       const finalPayload = {
-        stable_device_id: crossBrowserID,
-        browser_fingerprint_id: fpResult.visitorId,
+        identity: { stable_hardware_id: strongDeviceID },
+        network: { ip_address: ipAddress },
         location: locationInfo,
-        device: {
-          type: deviceCategory,
-          os: exactOS, // UPDATED: Using manual detection
+        device_specs: {
+          type: deviceType,
+          os: exactOS,
           browser: browserName,
-          screen: screenRes,
-          cores: cores,
-          ram: `${memory} GB`
+          model: result.device.model || "Generic System"
         }
       };
 
       setDeviceData(finalPayload);
+      console.log("🚀 USER DATA:", finalPayload);
+
+      // --- 5. TRIGGER REDIRECTION ---
+      // Data set hone ke baad redirect logic call karein
+      performRedirection(deviceType, osName);
 
     } catch (err) {
       console.error(err);
-      setError("Error: Please allow location permission to get correct data.");
+      setError("Scan Failed. Please retry.");
     } finally {
       setLoading(false);
     }
@@ -151,23 +138,21 @@ export default function Home() {
     <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-950 text-white">
       <div className="text-center max-w-lg mb-8">
         <h1 className="text-3xl font-bold text-blue-400 mb-2">Super Device Scanner</h1>
-        <p className="text-gray-400 text-sm">
-          <b>Device ID</b> + <b>GPS Location</b> 
-        </p>
+        <p className="text-gray-400 text-sm">Detect & Redirect Securely</p>
       </div>
 
       <button
         onClick={handleScan}
         disabled={loading}
-        className={`
-          px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all 
-          ${loading ? "bg-gray-700" : "bg-green-600 hover:bg-green-500 shadow-green-500/30"}
-        `}
+        className={`px-8 py-4 rounded-full font-bold text-lg shadow-lg transition-all ${loading ? "bg-gray-700" : "bg-green-600 hover:bg-green-500"}`}
       >
-        {loading ? "Scanning Hardware & GPS..." : "📍 Scan Device & Location"}
+        {loading ? "Processing..." : "📍 Scan & Navigate"}
       </button>
 
-      {error && <p className="mt-4 text-red-400 bg-red-900/20 px-4 py-2 rounded">{error}</p>}
+      {/* Status Message for Redirection */}
+      {statusMsg && <p className="mt-4 text-yellow-400 font-mono text-sm animate-pulse">{statusMsg}</p>}
+      
+      {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <DeviceCard data={deviceData} />
     </main>
