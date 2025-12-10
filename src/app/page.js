@@ -9,43 +9,53 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [deviceData, setDeviceData] = useState(null);
   const [error, setError] = useState("");
-  const [statusMsg, setStatusMsg] = useState(""); // User ko dikhane ke liye ki kya ho rha hai
+  const [statusMsg, setStatusMsg] = useState(""); 
 
-  // --- REDIRECTION LOGIC ---
+  // --- REDIRECTION LOGIC (UPDATED) ---
   const performRedirection = (deviceType, osName) => {
-    setStatusMsg(`Detected ${deviceType}. Redirecting...`);
+    setStatusMsg(`Detected ${deviceType}. Processing...`);
 
-    // 1. DESKTOP / LAPTOP / TABLET -> Go to Web Portal
-    // Note: UAParser tablet ko alag manta hai, isliye hum check kar rahe hain
-    if (deviceType !== "Mobile") {
+    // 1. DESKTOP / LAPTOP -> Go to Web Portal
+    if (deviceType !== "Mobile" && deviceType !== "Tablet") {
        setTimeout(() => {
          window.location.href = "https://sajpeweb.raavan.site/";
-       }, 1500); // 1.5 sec delay taaki user card dekh sake
+       }, 1500); 
        return;
     }
 
-    // 2. MOBILE (Android/iOS) -> Go to App or Play Store
-    if (deviceType === "Mobile") {
-       const appScheme = "sajpe://home"; // ⚠️ IMPORTANT: Aapke App ka Deep Link Scheme yahan dalein
+    // 2. MOBILE / TABLET -> App Deep Linking Logic
+    if (deviceType === "Mobile" || deviceType === "Tablet") {
+       const appScheme = "sajpe://home"; // Deep Link
        const playStoreLink = "https://play.google.com/store/apps/details?id=com.saj_pe";
-       
-       // iOS Specific (Optional: App Store link logic alag ho sakti hai)
-       // const appStoreLink = "https://apps.apple.com/app-id";
 
-       setStatusMsg("Launching App...");
+       setStatusMsg("Opening App...");
        
-       // Step A: Try to open the App
+       // --- MAGIC LOGIC START ---
+       
+       // Step A: Record Start Time
+       const start = Date.now();
+
+       // Step B: Try to Open App immediately
+       // Agar app installed hai, to OS browser ko minimize kar dega
        window.location.href = appScheme;
 
-       // Step B: Fallback to Play Store if App doesn't open
-       // Logic: Agar app khul gyi, to browser background me chala jayega aur timeout delay ho jayega.
-       // Agar app nahi khuli, to browser wahi rahega aur turant Play Store redirect kar dega.
+       // Step C: Fallback Timer (2.5 Seconds)
        setTimeout(() => {
-         const confirmFallback = window.confirm("SajPe App not found. Go to Play Store?");
-         if (confirmFallback) {
+         // Check: Kya browser abhi bhi hidden nahi hai?
+         // Agar App khul jati, to user app me chala jata aur browser 'hidden' ho jata.
+         // Agar user abhi bhi yahi hai, iska matlab App nahi khuli.
+         
+         const end = Date.now();
+         const elapsed = end - start;
+
+         // Agar time difference normal hai (matlab browser freeze nahi hua app khulne ki wajah se)
+         // Aur document abhi bhi visible hai
+         if (elapsed < 3000 && !document.hidden) {
+            setStatusMsg("App not found. Redirecting to Play Store...");
             window.location.href = playStoreLink;
          }
-       }, 2000);
+       }, 2500); 
+       // --- MAGIC LOGIC END ---
     }
   };
 
@@ -60,24 +70,19 @@ export default function Home() {
       const parser = new UAParser();
       const result = parser.getResult();
 
-      // OS Name
       const osName = result.os.name;
       const osVersion = result.os.version;
       const exactOS = `${osName} ${osVersion}`.trim();
-
-      // Browser
       const browserName = result.browser.name;
 
-      // Device Type Logic
-      let rawType = result.device.type; // mobile, tablet, smarttv, wearable, embedded
-      let deviceType = "Desktop / Laptop"; // Default
+      let rawType = result.device.type; 
+      let deviceType = "Desktop / Laptop"; 
 
       if (rawType) {
-        // Capitalize (mobile -> Mobile)
         deviceType = rawType.charAt(0).toUpperCase() + rawType.slice(1);
       }
 
-      // --- 2. FINGERPRINT & IP (Keeping your logic) ---
+      // --- 2. FINGERPRINT & IP ---
       const fp = await FingerprintJS.load();
       const fpResult = await fp.get();
       const strongDeviceID = fpResult.visitorId; 
@@ -123,7 +128,6 @@ export default function Home() {
       console.log("🚀 USER DATA:", finalPayload);
 
       // --- 5. TRIGGER REDIRECTION ---
-      // Data set hone ke baad redirect logic call karein
       performRedirection(deviceType, osName);
 
     } catch (err) {
@@ -149,7 +153,7 @@ export default function Home() {
         {loading ? "Processing..." : "📍 Scan & Navigate"}
       </button>
 
-      {/* Status Message for Redirection */}
+      {/* Status Message */}
       {statusMsg && <p className="mt-4 text-yellow-400 font-mono text-sm animate-pulse">{statusMsg}</p>}
       
       {error && <p className="mt-4 text-red-400">{error}</p>}
