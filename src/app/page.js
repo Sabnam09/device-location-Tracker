@@ -13,7 +13,6 @@ export default function Home() {
   const [error, setError] = useState("");
   const [statusMsg, setStatusMsg] = useState(""); 
 
-  // --- REDIRECTION LOGIC (Debugging Mode: Paused) ---
   const performRedirection = (deviceType, osName) => {
     setStatusMsg(`Detected ${deviceType}. Processing...`);
     // 🛑 DEBUGGING: Navigation roka hai taaki aap Console check kar sakein
