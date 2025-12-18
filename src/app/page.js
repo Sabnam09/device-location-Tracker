@@ -33,57 +33,55 @@ export default function Home() {
   };
 
 // --- 1. Navigation Flow Logic ---
-const performRedirection = (deviceType, type) => {
-  console.log("🚩 Redirection Triggered for Type:", type);
-  const { code } = getReferralInfo();
+const performRedirection = (deviceType, type, code) => {
+  console.log(`🚀 Redirection Triggered | Device: ${deviceType} | Type: ${type}`);
 
-  // --- 1. DESKTOP / LAPTOP / MAC FLOW ---
+  // --- 1. DESKTOP / LAPTOP FLOW ---
   if (deviceType !== "Mobile") {
-    
-    // CONDITION: Community (c) - No website, send to Play Store
-    if (type === 'c') {
-      setStatusMsg("No Web Version for Community. Redirecting to Play Store...");
-      setTimeout(() => {
-        window.location.href = "https://play.google.com/store/apps/details?id=com.saj_community";
-      }, 1500);
-      return;
-    }
-
-    // CONDITION: Business (b) - Specific Portal
     if (type === 'b') {
-      setStatusMsg("Redirecting to Business Portal...");
-      setTimeout(() => {
-        window.location.href = "https://sajpeweb.raavan.site/business/enter-number";
-      }, 1500);
-      return;
-    }
-
-    // CONDITION: SajPe (s) - Default Web
-    setStatusMsg("Redirecting to SajPe Web...");
-    setTimeout(() => {
+      // Saj Business Desktop
+      window.location.href = "https://sajpeweb.raavan.site/business/enter-number";
+    } else if (type === 'c') {
+      // Saj Community Desktop (No Website -> Play Store)
+      window.location.href = "https://play.google.com/store/apps/details?id=com.saj_community";
+    } else {
+      // SajPe Standard Desktop
       window.location.href = "https://sajpeweb.raavan.site/";
-    }, 1500);
+    }
     return;
   }
 
-  // --- 2. MOBILE FLOW (Deep Linking) ---
+  // --- 2. MOBILE FLOW (APK / PLAYSTORE) ---
   if (deviceType === "Mobile") {
-    let appScheme = "sajpe://home";
-    let storeLink = "https://play.google.com/store/apps/details?id=com.saj_pe";
+    let appScheme = "";
+    let playStoreLink = "";
 
+    // Specific logic for each app type
     if (type === 'b') {
-      appScheme = "sajbusiness://home";
-      storeLink = "https://play.google.com/store/apps/details?id=com.saj_business";
+      // SAJ BUSINESS MOBILE
+      appScheme = `sajbusiness://home?code=${code}`;
+      playStoreLink = "https://play.google.com/store/apps/details?id=com.saj_business";
     } else if (type === 'c') {
-      appScheme = "sajcommunity://home";
-      storeLink = "https://play.google.com/store/apps/details?id=com.saj_community";
+      // SAJ COMMUNITY MOBILE
+      appScheme = `sajcommunity://home?code=${code}`;
+      playStoreLink = "https://play.google.com/store/apps/details?id=com.saj_community";
+    } else {
+      // SAJPE MOBILE (Default)
+      appScheme = `sajpe://home?code=${code}`;
+      playStoreLink = "https://play.google.com/store/apps/details?id=com.saj_pe";
     }
 
+    console.log(`📱 Attempting to open: ${appScheme}`);
     window.location.href = appScheme;
-    
+
+    // Fallback logic: Agar 2.5 seconds mein app nahi khula, toh Play Store
     setTimeout(() => {
-      if (window.confirm("App not found. Open Play Store?")) {
-        window.location.href = storeLink;
+      // Check if user is still on this page
+      if (document.visibilityState === "visible") {
+        const confirmStore = window.confirm("SajPe Business App not found. Would you like to install it from Play Store?");
+        if (confirmStore) {
+          window.location.href = playStoreLink;
+        }
       }
     }, 2500);
   }
