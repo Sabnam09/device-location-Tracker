@@ -46,78 +46,94 @@ export default function Home() {
     };
   };
 
-  // Get precise GPS location
-  const getGPSLocation = () => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        console.log("Geolocation not supported");
-        resolve(null);
-        return;
-      }
+  // Get accurate location using GPS-first approach (from old code)
+  const getAccurateLocation = async () => {
+    let locationInfo = { 
+      lat: null, 
+      lon: null, 
+      city: "Permission Denied", 
+      state: "", 
+      country: "",
+      postal_code: "",
+      full_address: "",
+      accuracy: "low",
+      source: "none"
+    };
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy
-          });
-        },
-        (error) => {
-          console.warn("GPS error:", error.message);
-          resolve(null);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    });
-  };
-
-  // Reverse geocode GPS coordinates to address
-  const reverseGeocode = async (lat, lon) => {
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
-        { headers: { 'User-Agent': 'SajPe-App/1.0' } }
-      );
+      // Check geolocation permission first
+      const permissionStatus = await navigator.permissions.query({ name: 'geolocation' });
       
-      if (response.ok) {
-        const data = await response.json();
-        const addr = data.address;
-        return {
-          city: addr.city || addr.town || addr.village || addr.county || 'Unknown',
-          state: addr.state || addr.region || 'Unknown',
-          country: addr.country || 'Unknown',
-          postal_code: addr.postcode || '',
-          full_address: data.display_name || 'Address Not Available',
-          latitude: lat,
-          longitude: lon,
-          accuracy: 'high',
-          source: 'gps'
-        };
+      if (permissionStatus.state === 'granted' || permissionStatus.state === 'prompt') {
+        setStatusMsg("Getting GPS location...");
+        
+        // Get GPS coordinates
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            resolve, 
+            reject,
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+          );
+        });
+
+        const { latitude, longitude, accuracy: gpsAccuracy } = position.coords;
+        locationInfo.lat = latitude;
+        locationInfo.lon = longitude;
+        locationInfo.accuracy = "high";
+        locationInfo.source = "gps";
+
+        setStatusMsg("Converting GPS to address...");
+
+        // Reverse geocode to get address
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+          { headers: { 'User-Agent': 'SajPe-App/1.0' } }
+        );
+        
+        if (geoRes.ok) {
+          const geoJson = await geoRes.json();
+          const addr = geoJson.address;
+          
+          locationInfo.city = addr.city || addr.town || addr.village || addr.county || "Unknown";
+          locationInfo.state = addr.state || addr.region || "";
+          locationInfo.country = addr.country || "";
+          locationInfo.postal_code = addr.postcode || "";
+          locationInfo.full_address = geoJson.display_name;
+        }
+      } else {
+        // Permission denied or not supported - fall back to IP
+        setStatusMsg("GPS denied, using IP location...");
+        const ipLocation = await getIPLocation();
+        return ipLocation;
       }
-    } catch (error) {
-      console.warn("Reverse geocoding failed:", error);
+    } catch (err) {
+      console.warn("GPS location failed, falling back to IP:", err);
+      setStatusMsg("GPS failed, using IP location...");
+      
+      // Fallback to IP-based location
+      const ipLocation = await getIPLocation();
+      return ipLocation;
     }
-    return null;
+
+    return locationInfo;
   };
 
-  // Get location from IP with multiple fallback APIs
-  const getLocationFromIP = async (ip) => {
-    // Try multiple APIs in sequence
+  // Fallback IP-based location
+  const getIPLocation = async () => {
     const apis = [
       {
         name: 'ip-api.com',
-        fetch: async () => {
+        fetch: async (ip) => {
           const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,message,country,regionName,city,zip,lat,lon`);
           const data = await res.json();
           if (data.status === 'fail') throw new Error(data.message);
           return {
+            lat: data.lat,
+            lon: data.lon,
             city: data.city || 'Unknown',
             state: data.regionName || 'Unknown',
             country: data.country || 'Unknown',
             postal_code: data.zip || '',
-            latitude: data.lat,
-            longitude: data.lon,
             full_address: `${data.city}, ${data.regionName}, ${data.country}`,
             accuracy: 'medium',
             source: 'ip'
@@ -126,37 +142,18 @@ export default function Home() {
       },
       {
         name: 'ipapi.co',
-        fetch: async () => {
+        fetch: async (ip) => {
           const res = await fetch(`https://ipapi.co/${ip}/json/`);
           const data = await res.json();
           if (data.error) throw new Error(data.reason);
           return {
+            lat: data.latitude,
+            lon: data.longitude,
             city: data.city || 'Unknown',
             state: data.region || 'Unknown',
             country: data.country_name || 'Unknown',
             postal_code: data.postal || '',
-            latitude: data.latitude,
-            longitude: data.longitude,
             full_address: `${data.city}, ${data.region}, ${data.country_name}`,
-            accuracy: 'medium',
-            source: 'ip'
-          };
-        }
-      },
-      {
-        name: 'ipwhois.app',
-        fetch: async () => {
-          const res = await fetch(`https://ipwhois.app/json/${ip}`);
-          const data = await res.json();
-          if (!data.success) throw new Error('API failed');
-          return {
-            city: data.city || 'Unknown',
-            state: data.region || 'Unknown',
-            country: data.country || 'Unknown',
-            postal_code: data.postal || '',
-            latitude: data.latitude,
-            longitude: data.longitude,
-            full_address: `${data.city}, ${data.region}, ${data.country}`,
             accuracy: 'medium',
             source: 'ip'
           };
@@ -164,11 +161,32 @@ export default function Home() {
       }
     ];
 
-    // Try each API until one succeeds
+    // Get IP first
+    let ip = "";
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipJson = await ipRes.json();
+      ip = ipJson.ip;
+    } catch (e) {
+      console.warn("IP fetch failed");
+      return {
+        lat: null,
+        lon: null,
+        city: "Unknown",
+        state: "",
+        country: "",
+        postal_code: "",
+        full_address: "Location Not Available",
+        accuracy: "low",
+        source: "none"
+      };
+    }
+
+    // Try each API
     for (const api of apis) {
       try {
         console.log(`Trying ${api.name}...`);
-        const result = await api.fetch();
+        const result = await api.fetch(ip);
         console.log(`✅ ${api.name} succeeded`);
         return result;
       } catch (error) {
@@ -176,37 +194,18 @@ export default function Home() {
       }
     }
 
-    // All APIs failed - return fallback
+    // All failed
     return {
-      city: 'Unknown',
-      state: 'Unknown',
-      country: 'Unknown',
-      postal_code: '',
-      full_address: 'Location Not Available',
-      accuracy: 'low',
-      source: 'none'
+      lat: null,
+      lon: null,
+      city: "Unknown",
+      state: "",
+      country: "",
+      postal_code: "",
+      full_address: "Location Not Available",
+      accuracy: "low",
+      source: "none"
     };
-  };
-
-  // Get accurate location: GPS first, then IP fallback
-  const getAccurateLocation = async (ip) => {
-    setStatusMsg("Requesting GPS location...");
-    
-    // Try GPS first
-    const gpsCoords = await getGPSLocation();
-    
-    if (gpsCoords) {
-      setStatusMsg("Converting GPS to address...");
-      const addressData = await reverseGeocode(gpsCoords.latitude, gpsCoords.longitude);
-      
-      if (addressData) {
-        return addressData;
-      }
-    }
-
-    // Fallback to IP-based location
-    setStatusMsg("Using IP-based location...");
-    return await getLocationFromIP(ip);
   };
 
   // Navigation Flow Logic
@@ -221,7 +220,7 @@ export default function Home() {
     }
 
     // DESKTOP/LAPTOP
-    if (deviceType !== "Mobile") {
+    if (deviceType !== "Mobile" && deviceType !== "Tablet") {
       if (type === 'b') {
         setStatusMsg("Redirecting to Business Website...");
         window.location.href = "https://sajpeweb.raavan.site/business/enter-number";
@@ -232,8 +231,8 @@ export default function Home() {
       return;
     }
 
-    // MOBILE - Try app deep link first
-    if (deviceType === "Mobile") {
+    // MOBILE/TABLET - Try app deep link first
+    if (deviceType === "Mobile" || deviceType === "Tablet") {
       let appScheme, playStoreLink, appName;
 
       if (type === 'b') {
@@ -247,11 +246,17 @@ export default function Home() {
       }
 
       setStatusMsg(`Opening ${appName} App...`);
+      
+      // Magic deep link logic
+      const start = Date.now();
       window.location.href = appScheme;
 
-      // Fallback to Play Store after 2.5s
       setTimeout(() => {
-        if (document.visibilityState === "visible") {
+        const end = Date.now();
+        const elapsed = end - start;
+
+        if (elapsed < 3000 && !document.hidden) {
+          setStatusMsg("App not found. Redirecting to Play Store...");
           window.location.href = playStoreLink;
         }
       }, 2500);
@@ -262,81 +267,90 @@ export default function Home() {
   const handleScan = async (manualType = null, manualCode = null) => {
     setLoading(true);
     setError("");
+    setDeviceData(null);
 
     try {
       const info = getReferralInfo(manualType, manualCode);
 
-      setStatusMsg("Detecting device...");
+      setStatusMsg("Scanning device...");
 
-      // Get device fingerprint
+      // 1. Get device fingerprint
       const fp = await FingerprintJS.load();
       const fpResult = await fp.get();
+      const strongDeviceID = fpResult.visitorId;
 
-      // Get browser/device info
+      // 2. Get browser/device info
       const parser = new UAParser();
       const result = parser.getResult();
-      const deviceType = result.device.type ?
-        result.device.type.charAt(0).toUpperCase() + result.device.type.slice(1) :
-        "Desktop";
 
-      // Get IP address
+      const osName = result.os.name || 'Unknown';
+      const osVersion = result.os.version || '';
+      const exactOS = `${osName} ${osVersion}`.trim();
+      const browserName = result.browser.name || 'Unknown';
+      const browserVersion = result.browser.version || '';
+      const exactBrowser = `${browserName} ${browserVersion}`.trim();
+
+      let rawType = result.device.type;
+      let deviceType = "Desktop";
+
+      if (rawType) {
+        deviceType = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+      }
+
+      // 3. Get IP address
       setStatusMsg("Fetching IP address...");
-      const ipResponse = await fetch('https://api.ipify.org?format=json');
-      const { ip } = await ipResponse.json();
+      let ipAddress = "";
+      try {
+        const ipRes = await fetch("https://api.ipify.org?format=json");
+        const ipJson = await ipRes.json();
+        ipAddress = ipJson.ip;
+      } catch (e) {
+        console.warn("IP Error");
+        ipAddress = "Unknown";
+      }
 
-      // Get accurate location
-      const locationData = await getAccurateLocation(ip);
+      // 4. Get accurate location (GPS-first approach)
+      const locationInfo = await getAccurateLocation();
 
-      // Prepare complete device data
-      const deviceInfo = {
+      // 5. Prepare complete device data
+      const finalPayload = {
         identity: {
-          stable_hardware_id: fpResult.visitorId,
+          stable_hardware_id: strongDeviceID
         },
         network: {
-          ip_address: ip,
+          ip_address: ipAddress
         },
+        location: locationInfo,
         device_specs: {
           type: deviceType,
-          os: `${result.os.name || 'Unknown'} ${result.os.version || ''}`.trim(),
-          browser: `${result.browser.name || 'Unknown'} ${result.browser.version || ''}`.trim(),
-          model: result.device.model || result.device.vendor || 'Generic',
-          vendor: result.device.vendor || 'Unknown',
-        },
-        location: {
-          city: locationData.city,
-          state: locationData.state,
-          country: locationData.country,
-          postal_code: locationData.postal_code,
-          full_address: locationData.full_address,
-          latitude: locationData.latitude || null,
-          longitude: locationData.longitude || null,
-          accuracy: locationData.accuracy,
-          source: locationData.source
+          os: exactOS,
+          browser: exactBrowser,
+          model: result.device.model || result.device.vendor || "Generic System"
         },
         source_type: info.type,
-        referral_code: info.code,
+        referral_code: info.code
       };
 
-      setDeviceData(deviceInfo);
+      setDeviceData(finalPayload);
+      console.log("🚀 USER DATA:", finalPayload);
 
-      // Save to backend API
+      // 6. Save to backend API
       setStatusMsg("Saving device info...");
       const apiPayload = {
-        stable_hardware_id: fpResult.visitorId,
-        ip_address: ip,
+        stable_hardware_id: strongDeviceID,
+        ip_address: ipAddress,
         device_type: deviceType,
-        os: deviceInfo.device_specs.os,
-        browser: deviceInfo.device_specs.browser,
-        model: deviceInfo.device_specs.model,
-        vendor: deviceInfo.device_specs.vendor,
-        city: locationData.city,
-        state: locationData.state,
-        country: locationData.country,
-        postal_code: locationData.postal_code,
-        latitude: locationData.latitude,
-        longitude: locationData.longitude,
-        location_accuracy: locationData.accuracy,
-        location_source: locationData.source,
+        os: exactOS,
+        browser: exactBrowser,
+        model: finalPayload.device_specs.model,
+        city: locationInfo.city,
+        state: locationInfo.state,
+        country: locationInfo.country,
+        postal_code: locationInfo.postal_code,
+        latitude: locationInfo.lat,
+        longitude: locationInfo.lon,
+        location_accuracy: locationInfo.accuracy,
+        location_source: locationInfo.source,
         source_type: info.type,
         referral_code: info.code,
       };
@@ -345,14 +359,13 @@ export default function Home() {
 
       if (saveResult.success) {
         setStatusMsg("✅ Device info saved!");
-        // UNCOMMENT TO ENABLE NAVIGATION
-        // setTimeout(() => {
-        //   performRedirection(deviceType, info.type, info.code);
-        // }, 1000);
+        // Trigger redirection after 1 second
+        setTimeout(() => {
+          performRedirection(deviceType, info.type, info.code);
+        }, 1000);
       } else {
-        setError("Failed to save. Check data below.");
-        // UNCOMMENT TO ENABLE NAVIGATION ON ERROR
-        // performRedirection(deviceType, info.type, info.code);
+        setError("Failed to save. Redirecting anyway...");
+        performRedirection(deviceType, info.type, info.code);
       }
 
     } catch (err) {
