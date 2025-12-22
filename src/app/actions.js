@@ -27,7 +27,8 @@
 "use server";
 
 export async function saveDeviceDataSecurely(payload) {
-  const API_URL = "https://sajpebusiness.raavan.site/portal/users/device-details";
+  const API_URL = "https://sajpebusiness.raavan.site/portal/users/referral-info";
+  // const API_URL = "https://sajpebusiness.raavan.site/portal/users/device-details";
 
   try {
     // Note: Hum yahan await use kar rahe hain taaki request complete ho,
